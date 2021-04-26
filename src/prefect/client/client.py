@@ -6,7 +6,7 @@ import time
 import uuid
 import warnings
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, NamedTuple, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, List, NamedTuple, Optional, Union, Tuple
 from urllib.parse import urljoin
 
 # if simplejson is installed, `requests` defaults to using it instead of json
@@ -1816,3 +1816,147 @@ class Client:
             mutation,
             variables=dict(input=dict(task_run_artifact_id=task_run_artifact_id)),
         )
+
+    # TODO - do we need a create method at all? should we just set?
+    def create_key_value(self, name: str, value: str) -> str:
+        """
+        Create a key value pair
+        """
+
+        if prefect.config.backend != "cloud":
+            raise Client("Key Value operations are Cloud only")
+
+        mutation = {
+            "mutation($input: create_key_value_input!)": {
+                "create_key_value(input: $input)": {"id"}
+            }
+        }
+
+        result = self.graphql(
+            query=mutation, variables=dict(input=dict(name=name, value=value))
+        )
+
+        return result.data.create_key_value.id
+
+    def set_key_value_pairs(self, names: List[str], values: List[str]) -> List[str]:
+        """
+        Set key value pairs, overwriting values for any existing keys
+        """
+
+        if prefect.config.backend != "cloud":
+            raise Client("Key Value operations are Cloud only")
+
+        mutation = {
+            "mutation($input: set_key_value_pairs_input!)": {
+                "set_key_value_pairs(input: $input)": {"ids"}
+            }
+        }
+
+        result = self.graphql(
+            query=mutation, variables=dict(input=dict(names=names, values=values))
+        )
+
+        return result.data.set_key_value_pairs.ids
+
+    def get_key_value(self, name: str) -> str:
+        """
+        Get the value for a key
+        """
+        if prefect.config.backend != "cloud":
+            raise Client("Key Value operations are Cloud only")
+
+        query = {
+            "query": {
+                with_args("key_value", {"where": {"name": {"_eq": name}}}): {"value"}
+            }
+        }
+        result = self.graphql(query)  # type: Any
+        return result.data.key_value[0].value
+
+    def delete_key_value(self, name: str) -> bool:
+        """
+        Delete a key value pair
+        """
+        if prefect.config.backend != "cloud":
+            raise Client("Key Value operations are Cloud only")
+
+        mutation = {
+            "mutation($input: delete_key_value_input!)": {
+                "delete_key_value(input: $input)": {"success"}
+            }
+        }
+
+        result = self.graphql(query=mutation, variables=dict(input=dict(name=name)))
+
+        return result.data.delete_key_value.success
+
+    def list_key_values(self) -> List[Tuple]:
+        """
+        List all key value pairs
+        """
+        if prefect.config.backend != "cloud":
+            raise Client("Key Value operations are Cloud only")
+        # TODO - should we allow prefixing here?
+        result = self.graphql(
+            {"query": {"key_value(order_by: {name: asc})": {"id", "name", "value"}}}
+        )  # type: ignore
+        return [(res["name"], res["value"]) for res in result.data.key_value]
+
+    def set_key_value_pairs_from_nested_dict(
+        self, key_value_dict: Dict[str, Any]
+    ) -> None:
+        """
+        Bulk import key value pairs from nested dictionary
+
+        Only lowest level values will be used to create key-value pairs
+
+        Non-string value types will be cast to strings
+
+        dict = {
+            "foo": {
+                "bar": "1",
+                "baz": {
+                    "idk": "my bff jill"
+                }
+            }
+        }
+
+        Will become the pairs
+
+        foo.bar -> 1
+        foo.baz.idk -> my bff jill
+        """
+        if prefect.config.backend != "cloud":
+            raise Client("Key Value operations are Cloud only")
+
+        def create_key_value_pairs_from_dict(
+            dict_: Dict, path: str, pairs: List
+        ) -> List[Tuple]:
+            """
+            Helper function to recursively populate key value pairs from nested dict
+            """
+            for key, value in dict_.items():
+                new_path = f"{path}.{key}" if path else key
+                if isinstance(value, dict):
+                    pairs = create_key_value_pairs_from_dict(
+                        dict_=value, path=new_path, pairs=pairs
+                    )
+                else:
+                    pairs.append((new_path, str(value)))
+            return pairs
+
+        pairs = create_key_value_pairs_from_dict(key_value_dict, "", list())
+        return self.set_key_value_pairs(
+            names=[p[0] for p in pairs], values=[p[1] for p in pairs]
+        )
+
+    # def export_key_value_pairs_to_dict(self) -> Dict:
+    #     """
+    #     Export all key value pairs to nested dict
+
+    #     # TODO this will break if we have a top level key with a value - what should we do?
+    #     """
+    #     if prefect.config.backend != "cloud":
+    #         raise Client("Key Value operations are Cloud only")
+    #     pairs = self.list_key_values()
+    #     pass

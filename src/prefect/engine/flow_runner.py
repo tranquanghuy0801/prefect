@@ -190,6 +190,17 @@ class FlowRunner(Runner):
         for key, val in dates.items():
             context.setdefault(key, val)
 
+        # add key a value pairs to context
+        # TODO
+        # - is there a better way to do this?
+        # - is this going to impact performance?
+        from prefect import Client
+
+        client = Client()
+        kv_pairs = client.list_key_values()
+        kv_dict = {kv[0]: kv[1] for kv in kv_pairs}
+        context.setdefault("kv", kv_dict)
+
         for task in self.flow.tasks:
             task_contexts.setdefault(task, {}).update(
                 task_name=task.name, task_slug=self.flow.slugs[task]
