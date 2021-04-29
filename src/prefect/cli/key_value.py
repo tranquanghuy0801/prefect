@@ -1,9 +1,7 @@
 import click
-from click.exceptions import Abort
 from tabulate import tabulate
 
 from prefect import Client, config
-from prefect.utilities.exceptions import AuthorizationError, ClientError
 
 
 @click.group(hidden=True)
